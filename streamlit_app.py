@@ -27,6 +27,10 @@ try:
 except ValueError:
     DEFAULT_MAX_RESULTS = 30
 
+# 로그인 정보(secrets 우선, 환경 변수 폴백)
+AUTH_USERNAME = _get_secret("AUTH_USERNAME", os.getenv("AUTH_USERNAME", "admin"))
+AUTH_PASSWORD = _get_secret("AUTH_PASSWORD", os.getenv("AUTH_PASSWORD", "changeme"))
+
 YOUTUBE_VIDEOS_ENDPOINT = "https://www.googleapis.com/youtube/v3/videos"
 YOUTUBE_CHANNELS_ENDPOINT = "https://www.googleapis.com/youtube/v3/channels"
 
@@ -105,14 +109,48 @@ def validate_env() -> bool:
 YOUTUBE_API_KEY = "YOUR_YOUTUBE_DATA_API_KEY"
 YOUTUBE_REGION = "KR"
 MAX_RESULTS = 30
+AUTH_USERNAME = "admin"
+AUTH_PASSWORD = "changeme"
 """, language="toml")
         with st.expander(".env 예시(로컬 개발)"):
             st.code("""YOUTUBE_API_KEY=YOUR_YOUTUBE_DATA_API_KEY
 YOUTUBE_REGION=KR
 MAX_RESULTS=30
+AUTH_USERNAME=admin
+AUTH_PASSWORD=changeme
 """, language="bash")
         st.stop()
     return True
+
+
+def ensure_login() -> bool:
+    """간단한 로그인 게이트. 성공 시 session_state에 플래그 저장."""
+    if "is_authed" not in st.session_state:
+        st.session_state.is_authed = False
+
+    # 크리덴셜이 유효한지(빈값이 아닌지) 확인
+    if not AUTH_USERNAME or not AUTH_PASSWORD:
+        st.warning("로그인 자격 정보(AUTH_USERNAME/AUTH_PASSWORD)가 설정되지 않아 공개 모드로 동작합니다.")
+        st.session_state.is_authed = True
+        return True
+
+    if st.session_state.is_authed:
+        return True
+
+    st.header("🔐 로그인")
+    with st.form("login_form", clear_on_submit=False):
+        username = st.text_input("아이디", value="")
+        password = st.text_input("비밀번호", type="password", value="")
+        submitted = st.form_submit_button("로그인")
+
+        if submitted:
+            if username == str(AUTH_USERNAME) and password == str(AUTH_PASSWORD):
+                st.session_state.is_authed = True
+                st.success("로그인 성공")
+                st.rerun()
+            else:
+                st.error("아이디 또는 비밀번호가 올바르지 않습니다.")
+    return False
 
 
 def render_video_item(item: Dict[str, Any], channel_stats_map: Dict[str, Any]):
@@ -161,8 +199,18 @@ def main():
 
     validate_env()
 
+    # 로그인 게이트
+    if not ensure_login():
+        return
+
     with st.sidebar:
         st.subheader("옵션")
+        # 로그아웃 버튼
+        if st.button("로그아웃", type="secondary"):
+            st.session_state.is_authed = False
+            fetch_popular_videos.clear()
+            fetch_channel_statistics.clear()
+            st.rerun()
         region_presets = [
             ("KR", "대한민국"),
             ("US", "미국"),
